@@ -40,11 +40,11 @@ unsigned long lastDebounceTimeSC = 0;  // the last time the output SC was toggle
 unsigned long debounceDelaySC = 20;    // the debounce time; increase if the output flickers
 unsigned long Presed = 0;
 int buttonStateSC;                     // the current reading from the input pin
-int lastButtonStateSC = 0;           // the previous reading from the input pin SC
+int lastButtonStateSC = 0;             // the previous reading from the input pin SC
 String message = "";
 bool FluoroOn = false;
 
-void LoRa_rxMode();            // function declarations
+void LoRa_rxMode();                    // function declarations
 void LoRa_txMode();
 void LoRa_sendMessage(String message);
 void onReceive(int packetSize);
