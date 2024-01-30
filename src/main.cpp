@@ -32,17 +32,18 @@
 
 #define Gateway 4              // Gateway Input Pin
 
-const long frequency = 432E6;  // LoRa Frequency
+const long frequency = 43352E4;// LoRa Frequency
 
 const int csPin = 10;          // LoRa radio chip select
 const int resetPin = 9;        // LoRa radio reset
 const int irqPin = 2;          // change for your board; must be a hardware interrupt pin
 bool MessageOk = false;
 bool Selected = false;
+bool NoFirstData = true;
 unsigned long counter = 0;
 String message = "";
 unsigned int menuItem = 2;
-int MenuVar[6] = {10,11,12,13,14,15};
+int MenuVar[6] = {0,20,30,40,50,60};
 
 void LoRa_rxMode();                    // function declarations
 void LoRa_txMode();
@@ -91,13 +92,11 @@ void setup() {
     u8x8.setCursor(0,0);             // Column, Row
     u8x8.print("LoRa Gateway On");
   }
-  Refresh_Display();
   delay(1000);
   LoRa.onReceive(onReceive);
   LoRa.onTxDone(onTxDone);
   LoRa_rxMode();
-  
-  }
+}
 
 void loop() {
   if (digitalRead(Gateway)){
@@ -154,10 +153,18 @@ void loop() {
       u8x8.print("Hand Shake " + RSSI + " ");
       message = "";
       counter = millis();
+      if (NoFirstData) {
+        for(int i = 7; i >= 2; i--) {
+          LoRa_sendMessage("MI" + String(i) + String(Selected) + String(MenuVar[i - 2]));
+          delay(100);
+        }
+        Refresh_Display();
+        NoFirstData = false;
+      }
     }
     // Normal Read for Node
-    Serial.print("RSSI: ");
-    Serial.println(LoRa.packetRssi());
+    // Serial.print("RSSI: ");
+    // Serial.println(LoRa.packetRssi());
 
     MessageOk = false;
   }
@@ -196,13 +203,13 @@ void onReceive(int packetSize) {
     message += (char)LoRa.read();
   }
   if (digitalRead(Gateway)) {
-    Serial.print("Node Receive: ");
-    Serial.println(message);
+    // Serial.print("Node Receive: ");
+    // Serial.println(message);
     MessageOk = true;
   } else {
-    Serial.print("Gateway Receive: ");
-    Serial.print(message);
-    Serial.print(" ,RSSI:");
+    // Serial.print("Gateway Receive: ");
+    // Serial.print(message);
+    // Serial.print(" ,RSSI:");
     MessageOk = true;
   }
 }
@@ -228,7 +235,7 @@ void Refresh_Display(void){
   // u8x8.clear();
   counter = millis();
   u8x8.setCursor(0 ,2);              // Column, Row
-  u8x8.print("  Item 1  "); u8x8.print(MenuVar[0]); u8x8.print("  ");
+  u8x8.print("  Power   "); if (MenuVar[0] < 1) u8x8.print("OFF"); else u8x8.print("ON "); 
   u8x8.setCursor(0 ,3);              // Column, Row
   u8x8.print("  Item 2  "); u8x8.print(MenuVar[1]); u8x8.print("  ");
   u8x8.setCursor(0 ,4);              // Column, Row
@@ -240,7 +247,7 @@ void Refresh_Display(void){
   u8x8.setCursor(0 ,7);              // Column, Row
   u8x8.print("  Item 6  "); u8x8.print(MenuVar[5]); u8x8.print("  ");
   u8x8.setCursor(0 ,menuItem);              // Column, Row
-  if (Selected) u8x8.print(">>"); else u8x8.print("> ");
+  if (Selected) u8x8.print(">-"); else u8x8.print(" -");
   while(encoder.BUTTON_PRESSED);
   while(encoder.CLOCKWISE);
   while(encoder.COUNTERCLOCKWISE);
@@ -250,7 +257,9 @@ void ChekBotonera(int key){
 switch(key){
   case 1:
     if (Selected) {
-      MenuVar[menuItem - 2] += 1; 
+      if (menuItem == 2) {
+        if (MenuVar[0] <= 0) MenuVar[0] = 1; 
+      } else MenuVar[menuItem - 2] += 1; 
     }
     else{
       if (menuItem < 7) menuItem++; else menuItem = 2;
@@ -261,7 +270,9 @@ switch(key){
 
   case 2:
     if (Selected) {
-      MenuVar[menuItem - 2] -= 1; 
+      if (menuItem == 2){
+        if (MenuVar[0] >= 1) MenuVar[0] = 0;
+      } else MenuVar[menuItem - 2] -= 1; 
     }
     else{
       if (menuItem > 2) menuItem--; else menuItem = 7;
