@@ -24,104 +24,162 @@
   by Luiz H. Cassettari
 */
 
-#include <SPI.h>              // include libraries
+#include <SPI.h>               // include libraries
 #include <LoRa.h>
-#define Scopia 4
+#include <Wire.h>
+#include <U8g2lib.h>           // Include the U8g2lib library
+#include <SimpleEncoder.h>
+
+#define Gateway 4              // Gateway Input Pin
 
 const long frequency = 432E6;  // LoRa Frequency
 
 const int csPin = 10;          // LoRa radio chip select
 const int resetPin = 9;        // LoRa radio reset
 const int irqPin = 2;          // change for your board; must be a hardware interrupt pin
-
-int counter = 0;
-char SCin = 0;
-unsigned long lastDebounceTimeSC = 0;  // the last time the output SC was toggled
-unsigned long debounceDelaySC = 20;    // the debounce time; increase if the output flickers
-unsigned long Presed = 0;
-int buttonStateSC;                     // the current reading from the input pin
-int lastButtonStateSC = 0;             // the previous reading from the input pin SC
+bool MessageOk = false;
+bool Selected = false;
+unsigned long counter = 0;
 String message = "";
-bool FluoroOn = false;
+unsigned int menuItem = 2;
+int MenuVar[6] = {10,11,12,13,14,15};
 
 void LoRa_rxMode();                    // function declarations
 void LoRa_txMode();
-void LoRa_sendMessage(String message);
-void onReceive(int packetSize);
+void LoRa_sendMessage(String);
+void onReceive(int);
 void onTxDone();
-boolean runEvery(unsigned long interval);
+boolean runEvery(unsigned long);
+void Refresh_Display(void);
+void ChekBotonera(int);
+
+const int BTN = 7;
+const int encA = 5;
+const int encB = 6;
+
+SimpleEncoder encoder(BTN, encA, encB);
+
+U8X8_SH1106_128X64_NONAME_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE);
+
 
 void setup() {
-  pinMode(Scopia, INPUT_PULLUP);
-  digitalWrite(Scopia, HIGH);
+  pinMode(Gateway, INPUT_PULLUP);
+  digitalWrite(Gateway, HIGH);
   Serial.begin(9600);                   // initialize serial
+  u8x8.begin();  // initialize with the I2C
+  u8x8.setPowerSave(0);
+  // init done
+  u8x8.setFont(u8x8_font_pxplustandynewtv_r);  // u8x8_font_torussansbold8_r, u8x8_font_chroma48medium8_r, u8x8_font_victoriamedium8_r, u8x8_font_pxplustandynewtv_r
+  u8x8.draw1x2String(0,0,"Pimax s.r.l.");
+  u8x8.setCursor(0,2);             // Column, Row
+  u8x8.print("Pimax Remote");
   while (!Serial);
-
   LoRa.setPins(csPin, resetPin, irqPin);
-
   if (!LoRa.begin(frequency)) {
-    Serial.println("LoRa init failed. Check your connections.");
+    u8x8.setCursor(0,3);             // Column, Row
+    u8x8.print("LoRa init failed");
     while (true);                       // if failed, do nothing
   }
-
-  Serial.println("LoRa init succeeded.");
-  Serial.println();
-  Serial.println("LoRa Simple Node");
-  Serial.println("Only receive messages from gateways");
-  Serial.println("Tx: invertIQ disable");
-  Serial.println("Rx: invertIQ enable");
-  Serial.println();
-
+  u8x8.setCursor(0,3);             // Column, Row
+  u8x8.print("LoRa succeeded");
+  delay(1000);
+  u8x8.clear();
+  if (digitalRead(Gateway)) {
+    u8x8.setCursor(0,0);             // Column, Row
+    u8x8.print("LoRa Node On");
+  } else {
+    u8x8.setCursor(0,0);             // Column, Row
+    u8x8.print("LoRa Gateway On");
+  }
+  Refresh_Display();
+  delay(1000);
   LoRa.onReceive(onReceive);
   LoRa.onTxDone(onTxDone);
   LoRa_rxMode();
-}
+  
+  }
 
 void loop() {
-// Fluoro Input ------------------------------
-  SCin = digitalRead(Scopia);
-  if (SCin != lastButtonStateSC) {
-    // reset the debouncing timer
-    lastDebounceTimeSC = millis();
-  }
-  if ((millis() - lastDebounceTimeSC) > debounceDelaySC) {        // Demora para empesar a pulsar en Cine
-    // whatever the reading is at, it's been there for longer
-    // than the debounce delay, so take it as the actual current state:
-    // if the button state has changed:
-    if (SCin != buttonStateSC) {
-      buttonStateSC = SCin;
-      // only toggle the FluoroOn if the new Scopia button state is LOW
-      if (buttonStateSC == HIGH) {
-        message = "FluoroOff";
-        FluoroOn = true;
-        counter++;
-      }else {
-        message = "FluoroOn";
-        FluoroOn = true;
-        counter++;
-      }
+  if (digitalRead(Gateway)){
+    if (encoder.CLOCKWISE) {
+      ChekBotonera(1);
+    }
+    if (encoder.COUNTERCLOCKWISE) {
+      ChekBotonera(2);
+    }
+    if (encoder.BUTTON_PRESSED) {
+      ChekBotonera(3);
     }
   }
-  
-  lastButtonStateSC = SCin;
 
-
-  if (FluoroOn) {
+  if (runEvery(4000) && digitalRead(Gateway)) {
+    message = "HS";
     LoRa_sendMessage(message); // send a message
-    FluoroOn = false;
-    Serial.print("Send Message: ");
-    Serial.println(message);
+    u8x8.setCursor(0,1);             // Column, Row
+    u8x8.print("Hand Shake Fail ");
+  }
+  if (millis() - counter > 4500 && !digitalRead(Gateway)) {
+    u8x8.setCursor(0,1);             // Column, Row
+    u8x8.print("Hand Shake Fail ");
+    counter = millis();
+  }
+
+  if (MessageOk && !digitalRead(Gateway)) {   // Gateway Use
+    // If first 2 characters received are HS, send a message back
+    if (message.substring(0, 2) == "HS") {
+      LoRa_sendMessage("ACK");
+      String RSSI = String(LoRa.packetRssi());
+      u8x8.setCursor(0,1);             // Column, Row
+      u8x8.print("Hand Shake " + RSSI + " ");
+      counter = millis();
+      message = "";
+    }
+    // Normal Read for Gateway
+    if (message.substring(0, 2) == "MI") {
+      menuItem = message.substring(2, 3).toInt();
+      MenuVar[menuItem - 2] = message.substring(4).toInt();
+      if (message.substring(3, 4).toInt() == 1) Selected = true; else Selected = false;
+      Refresh_Display();
+      counter = millis();
+      message = "";
+    }
+
+    MessageOk = false;
+  }  
+  if (MessageOk && digitalRead(Gateway)) {    // Node Use
+    // If first 3 characters received are ACK, Hand Shake Ok
+    if (message.substring(0, 3) == "ACK") {
+      String RSSI = String(LoRa.packetRssi());
+      u8x8.setCursor(0,1);             // Column, Row
+      u8x8.print("Hand Shake " + RSSI + " ");
+      message = "";
+      counter = millis();
+    }
+    // Normal Read for Node
+    Serial.print("RSSI: ");
+    Serial.println(LoRa.packetRssi());
+
+    MessageOk = false;
   }
 }
 
+
 void LoRa_rxMode(){
-  LoRa.enableInvertIQ();                // active invert I and Q signals
+  if (digitalRead(Gateway)) {
+    LoRa.enableInvertIQ();              // active invert I and Q signals
+  } else {
+    LoRa.disableInvertIQ();             // normal mode
+  }
   LoRa.receive();                       // set receive mode
 }
 
 void LoRa_txMode(){
   LoRa.idle();                          // set standby mode
-  LoRa.disableInvertIQ();               // normal mode
+  if (digitalRead(Gateway)) {
+    LoRa.disableInvertIQ();             // normal mode
+  } else {
+    LoRa.enableInvertIQ();              // active invert I and Q signals
+  }
 }
 
 void LoRa_sendMessage(String message) {
@@ -132,14 +190,21 @@ void LoRa_sendMessage(String message) {
 }
 
 void onReceive(int packetSize) {
-  String message = "";
+  message = "";
 
   while (LoRa.available()) {
     message += (char)LoRa.read();
   }
-
-  Serial.print("Node Receive: ");
-  Serial.println(message);
+  if (digitalRead(Gateway)) {
+    Serial.print("Node Receive: ");
+    Serial.println(message);
+    MessageOk = true;
+  } else {
+    Serial.print("Gateway Receive: ");
+    Serial.print(message);
+    Serial.print(" ,RSSI:");
+    MessageOk = true;
+  }
 }
 
 void onTxDone() {
@@ -157,4 +222,62 @@ boolean runEvery(unsigned long interval)
     return true;
   }
   return false;
+}
+
+void Refresh_Display(void){
+  // u8x8.clear();
+  counter = millis();
+  u8x8.setCursor(0 ,2);              // Column, Row
+  u8x8.print("  Item 1  "); u8x8.print(MenuVar[0]); u8x8.print("  ");
+  u8x8.setCursor(0 ,3);              // Column, Row
+  u8x8.print("  Item 2  "); u8x8.print(MenuVar[1]); u8x8.print("  ");
+  u8x8.setCursor(0 ,4);              // Column, Row
+  u8x8.print("  Item 3  "); u8x8.print(MenuVar[2]); u8x8.print("  ");
+  u8x8.setCursor(0 ,5);              // Column, Row
+  u8x8.print("  Item 4  "); u8x8.print(MenuVar[3]); u8x8.print("  ");
+  u8x8.setCursor(0 ,6);              // Column, Row
+  u8x8.print("  Item 5  "); u8x8.print(MenuVar[4]); u8x8.print("  ");
+  u8x8.setCursor(0 ,7);              // Column, Row
+  u8x8.print("  Item 6  "); u8x8.print(MenuVar[5]); u8x8.print("  ");
+  u8x8.setCursor(0 ,menuItem);              // Column, Row
+  if (Selected) u8x8.print(">>"); else u8x8.print("> ");
+  while(encoder.BUTTON_PRESSED);
+  while(encoder.CLOCKWISE);
+  while(encoder.COUNTERCLOCKWISE);
+}
+
+void ChekBotonera(int key){
+switch(key){
+  case 1:
+    if (Selected) {
+      MenuVar[menuItem - 2] += 1; 
+    }
+    else{
+      if (menuItem < 7) menuItem++; else menuItem = 2;
+    }
+    Refresh_Display();
+    LoRa_sendMessage("MI" + String(menuItem) + String(Selected) + String(MenuVar[menuItem - 2]));
+    break;
+
+  case 2:
+    if (Selected) {
+      MenuVar[menuItem - 2] -= 1; 
+    }
+    else{
+      if (menuItem > 2) menuItem--; else menuItem = 7;
+    }
+    Refresh_Display();
+    LoRa_sendMessage("MI" + String(menuItem) + String(Selected) + String(MenuVar[menuItem - 2]));
+    break;
+
+  case 3:
+    if (Selected) Selected = false; else Selected = true;
+    Refresh_Display();
+    LoRa_sendMessage("MI" + String(menuItem) + String(Selected) + String(MenuVar[menuItem - 2]));
+    break;
+
+  default:
+    // error = true;
+    break;
+  }
 }
