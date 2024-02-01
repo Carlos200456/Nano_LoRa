@@ -29,6 +29,7 @@
 #include <Wire.h>
 #include <U8g2lib.h>           // Include the U8g2lib library
 #include <SimpleEncoder.h>
+#include <EEPROM.h>
 
 #define Gateway 4              // Gateway Input Pin
 
@@ -40,10 +41,14 @@ const int irqPin = 2;          // change for your board; must be a hardware inte
 bool MessageOk = false;
 bool Selected = false;
 bool NoFirstData = true;
+bool DisplayOn = false;
 unsigned long counter = 0;
+unsigned long TimeInterval = 500;
 String message = "";
 unsigned int menuItem = 2;
-int MenuVar[6] = {0,20,30,40,50,60};
+int MenuVar[6] = {0,0,0,0,0,20};
+int eeAddress; //EEPROM address to start reading from
+
 
 void LoRa_rxMode();                    // function declarations
 void LoRa_txMode();
@@ -53,6 +58,8 @@ void onTxDone();
 boolean runEvery(unsigned long);
 void Refresh_Display(void);
 void ChekBotonera(int);
+int ReadEEPROM(int); 
+void WriteEEPROM(int, int);
 
 const int BTN = 7;
 const int encA = 5;
@@ -87,12 +94,17 @@ void setup() {
   u8x8.clear();
   if (digitalRead(Gateway)) {
     u8x8.setCursor(0,0);             // Column, Row
-    u8x8.print("LoRa Node On");
+    u8x8.print("LoRa Remoto On");
   } else {
     u8x8.setCursor(0,0);             // Column, Row
-    u8x8.print("LoRa Gateway On");
+    u8x8.print("LoRa Equipo On");
+    for (int i = 0; i < 6; i++){
+      MenuVar[i] = ReadEEPROM(i);
+    }
+    delay(500);
+    Refresh_Display();
   }
-  delay(1000);
+  delay(500);
   LoRa.onReceive(onReceive);
   LoRa.onTxDone(onTxDone);
   LoRa_rxMode();
@@ -111,15 +123,16 @@ void loop() {
     }
   }
 
-  if (runEvery(4000) && digitalRead(Gateway)) {
+  if (runEvery(TimeInterval) && digitalRead(Gateway)) {
     message = "HS";
     LoRa_sendMessage(message); // send a message
     u8x8.setCursor(0,1);             // Column, Row
-    u8x8.print("Hand Shake Fail ");
+    u8x8.print("Sin Conexion    ");
+    TimeInterval = 500;
   }
-  if (millis() - counter > 4500 && !digitalRead(Gateway)) {
+  if (millis() - counter > 5500 && !digitalRead(Gateway)) {
     u8x8.setCursor(0,1);             // Column, Row
-    u8x8.print("Hand Shake Fail ");
+    u8x8.print("Sin Conexion    ");
     counter = millis();
   }
 
@@ -129,47 +142,58 @@ void loop() {
       LoRa_sendMessage("ACK");
       String RSSI = String(LoRa.packetRssi());
       u8x8.setCursor(0,1);             // Column, Row
-      u8x8.print("Hand Shake " + RSSI + " ");
-      counter = millis();
+      u8x8.print("Conectado S" + RSSI + " ");
+      if (NoFirstData) {
+        delay(500);
+        for(int i = 7; i >= 2; i--) {
+          LoRa_sendMessage("MI" + String(i) + String(Selected) + String(MenuVar[i - 2]));
+          delay(500);
+        }
+        delay(500);
+        Refresh_Display();
+        NoFirstData = false;
+      }
       message = "";
     }
     // Normal Read for Gateway
     if (message.substring(0, 2) == "MI") {
       menuItem = message.substring(2, 3).toInt();
       MenuVar[menuItem - 2] = message.substring(4).toInt();
+      WriteEEPROM(menuItem - 2, MenuVar[menuItem - 2]);
       if (message.substring(3, 4).toInt() == 1) Selected = true; else Selected = false;
       Refresh_Display();
-      counter = millis();
       message = "";
     }
-
+    if (message.substring(0, 2) == "RI") {
+      message = "";
+      NoFirstData = true;
+    }
+    counter = millis();
     MessageOk = false;
   }  
   if (MessageOk && digitalRead(Gateway)) {    // Node Use
     // If first 3 characters received are ACK, Hand Shake Ok
     if (message.substring(0, 3) == "ACK") {
       String RSSI = String(LoRa.packetRssi());
+      TimeInterval = 5000;
       u8x8.setCursor(0,1);             // Column, Row
-      u8x8.print("Hand Shake " + RSSI + " ");
+      u8x8.print("Conectado S" + RSSI + " ");
+      if (!DisplayOn) LoRa_sendMessage("RI");
       message = "";
-      counter = millis();
-      if (NoFirstData) {
-        for(int i = 7; i >= 2; i--) {
-          LoRa_sendMessage("MI" + String(i) + String(Selected) + String(MenuVar[i - 2]));
-          delay(100);
-        }
-        Refresh_Display();
-        NoFirstData = false;
-      }
     }
     // Normal Read for Node
-    // Serial.print("RSSI: ");
-    // Serial.println(LoRa.packetRssi());
-
+    if (message.substring(0, 2) == "MI") {
+      menuItem = message.substring(2, 3).toInt();
+      MenuVar[menuItem - 2] = message.substring(4).toInt();
+      if (message.substring(3, 4).toInt() == 1) Selected = true; else Selected = false;
+      Refresh_Display();
+      message = "";
+      NoFirstData = false;
+    }
+    counter = millis();
     MessageOk = false;
   }
 }
-
 
 void LoRa_rxMode(){
   if (digitalRead(Gateway)) {
@@ -198,20 +222,10 @@ void LoRa_sendMessage(String message) {
 
 void onReceive(int packetSize) {
   message = "";
-
   while (LoRa.available()) {
     message += (char)LoRa.read();
   }
-  if (digitalRead(Gateway)) {
-    // Serial.print("Node Receive: ");
-    // Serial.println(message);
-    MessageOk = true;
-  } else {
-    // Serial.print("Gateway Receive: ");
-    // Serial.print(message);
-    // Serial.print(" ,RSSI:");
-    MessageOk = true;
-  }
+  MessageOk = true;
 }
 
 void onTxDone() {
@@ -234,6 +248,12 @@ boolean runEvery(unsigned long interval)
 void Refresh_Display(void){
   // u8x8.clear();
   counter = millis();
+  u8x8.setCursor(15 ,0);              // Column, Row
+  if (!NoFirstData) {
+    u8x8.print("C");
+  } else {
+    u8x8.print("E");
+  }
   u8x8.setCursor(0 ,2);              // Column, Row
   u8x8.print("  Power   "); if (MenuVar[0] < 1) u8x8.print("OFF"); else u8x8.print("ON "); 
   u8x8.setCursor(0 ,3);              // Column, Row
@@ -249,8 +269,7 @@ void Refresh_Display(void){
   u8x8.setCursor(0 ,menuItem);              // Column, Row
   if (Selected) u8x8.print(">-"); else u8x8.print(" -");
   while(encoder.BUTTON_PRESSED);
-  while(encoder.CLOCKWISE);
-  while(encoder.COUNTERCLOCKWISE);
+  DisplayOn = true;
 }
 
 void ChekBotonera(int key){
@@ -291,4 +310,17 @@ switch(key){
     // error = true;
     break;
   }
+}
+
+int ReadEEPROM(int i){
+  int Data;
+  eeAddress = sizeof(int) * i; 
+  //Get the int data from the EEPROM at position 'eeAddress'
+  EEPROM.get(eeAddress, Data);
+  return Data;
+}
+
+void WriteEEPROM(int i, int Data){
+  eeAddress = sizeof(int) * i; 
+  EEPROM.put(eeAddress, Data);
 }
