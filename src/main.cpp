@@ -162,8 +162,8 @@ void loop() {
           // u8x8.setCursor(14,1); u8x8.print(String(i));
           // if (!WaitForAnswer()) return;
           // u8x8.setCursor(15,1); u8x8.print(String(i));
+          delay(500);
         }
-        delay(500);
         NoFirstData = false;
       }
       Refresh_Display();
@@ -173,9 +173,9 @@ void loop() {
     if (message.substring(0, 2) == "MI") {
       menuItem = message.substring(2, 3).toInt();
       MenuVar[menuItem - 2] = message.substring(4).toInt();
-      WriteEEPROM(menuItem - 2, MenuVar[menuItem - 2]);
       if (message.substring(3, 4).toInt() == 1) Selected = true; else Selected = false;
       Refresh_Display();
+      if (Selected) WriteEEPROM(menuItem - 2, MenuVar[menuItem - 2]);
       message = "";
     }
     if (message.substring(0, 2) == "RI") {
@@ -306,6 +306,8 @@ void Refresh_Display(void){
   u8x8.print("  Item 6  "); u8x8.print(MenuVar[5]); u8x8.print("  ");
   u8x8.setCursor(0 ,menuItem);              // Column, Row
   if (Selected) u8x8.print(">-"); else u8x8.print(" -");
+  while(encoder.CLOCKWISE);
+  while(encoder.COUNTERCLOCKWISE);
   while(encoder.BUTTON_PRESSED);
   DisplayOn = true;
 }
