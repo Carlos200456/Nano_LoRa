@@ -42,9 +42,12 @@ bool MessageOk = false;
 bool Selected = false;
 bool NoFirstData = true;
 bool DisplayOn = false;
+bool WaitForConfirm = false;
 unsigned long counter = 0;
 unsigned long TimeInterval = 500;
 String message = "";
+String SentMessage = "";
+String ReceivedMessage = "";
 unsigned int menuItem = 2;
 int MenuVar[6] = {0,0,0,0,0,20};
 int eeAddress; //EEPROM address to start reading from
@@ -60,6 +63,8 @@ void Refresh_Display(void);
 void ChekBotonera(int);
 int ReadEEPROM(int); 
 void WriteEEPROM(int, int);
+bool confirmRecipt(String);
+bool WaitForAnswer(void);
 
 const int BTN = 7;
 const int encA = 5;
@@ -136,23 +141,32 @@ void loop() {
     counter = millis();
   }
 
-  if (MessageOk && !digitalRead(Gateway)) {   // Gateway Use
+  if (MessageOk && WaitForConfirm) {   
+    // if (confirmRecipt) LoRa_sendMessage("ACK"); else LoRa_sendMessage("NACK");
+    // WaitForConfirm = false;
+  }
+
+
+  // Gateway Exclusiv Code ---------------<<<<<<<<<<<<<<<<<<<<<<<<
+  if (MessageOk && !digitalRead(Gateway)) {   
     // If first 2 characters received are HS, send a message back
     if (message.substring(0, 2) == "HS") {
       LoRa_sendMessage("ACK");
       String RSSI = String(LoRa.packetRssi());
       u8x8.setCursor(0,1);             // Column, Row
-      u8x8.print("Conectado S" + RSSI + " ");
+      u8x8.print("Conect " + RSSI + "   ");
       if (NoFirstData) {
         delay(500);
         for(int i = 7; i >= 2; i--) {
           LoRa_sendMessage("MI" + String(i) + String(Selected) + String(MenuVar[i - 2]));
-          delay(500);
+          // u8x8.setCursor(14,1); u8x8.print(String(i));
+          // if (!WaitForAnswer()) return;
+          // u8x8.setCursor(15,1); u8x8.print(String(i));
         }
         delay(500);
-        Refresh_Display();
         NoFirstData = false;
       }
+      Refresh_Display();
       message = "";
     }
     // Normal Read for Gateway
@@ -170,14 +184,16 @@ void loop() {
     }
     counter = millis();
     MessageOk = false;
-  }  
-  if (MessageOk && digitalRead(Gateway)) {    // Node Use
+  }
+
+  // Node Exclusiv Code ---------------<<<<<<<<<<<<<<<<<<<<<<<<
+  if (MessageOk && digitalRead(Gateway)) {    
     // If first 3 characters received are ACK, Hand Shake Ok
     if (message.substring(0, 3) == "ACK") {
       String RSSI = String(LoRa.packetRssi());
       TimeInterval = 5000;
       u8x8.setCursor(0,1);             // Column, Row
-      u8x8.print("Conectado S" + RSSI + " ");
+      u8x8.print("Conect " + RSSI + "   ");
       if (!DisplayOn) LoRa_sendMessage("RI");
       message = "";
     }
@@ -186,6 +202,7 @@ void loop() {
       menuItem = message.substring(2, 3).toInt();
       MenuVar[menuItem - 2] = message.substring(4).toInt();
       if (message.substring(3, 4).toInt() == 1) Selected = true; else Selected = false;
+      // LoRa_sendMessage(message);
       Refresh_Display();
       message = "";
       NoFirstData = false;
@@ -193,6 +210,23 @@ void loop() {
     counter = millis();
     MessageOk = false;
   }
+}
+
+bool confirmRecipt(String Messag){
+  if (SentMessage == Messag) return true; else return false;
+}
+
+bool WaitForAnswer(void){
+  counter = millis();
+  while((millis() - counter) < 2000){
+    if (MessageOk){
+      if (message.substring(0, 4) == "NACK") {
+        LoRa_sendMessage(SentMessage);
+      }
+      return confirmRecipt(message);
+    }
+  }
+  return false;
 }
 
 void LoRa_rxMode(){
@@ -213,11 +247,13 @@ void LoRa_txMode(){
   }
 }
 
-void LoRa_sendMessage(String message) {
+void LoRa_sendMessage(String messa) {
   LoRa_txMode();                        // set tx mode
   LoRa.beginPacket();                   // start packet
-  LoRa.print(message);                  // add payload
+  LoRa.print(messa);                    // add payload
   LoRa.endPacket(true);                 // finish packet and send it
+  SentMessage = messa;
+  // if (messa.substring(0, 2) == "MI") WaitForConfirm = true;
 }
 
 void onReceive(int packetSize) {
@@ -248,11 +284,13 @@ boolean runEvery(unsigned long interval)
 void Refresh_Display(void){
   // u8x8.clear();
   counter = millis();
-  u8x8.setCursor(15 ,0);              // Column, Row
-  if (!NoFirstData) {
-    u8x8.print("C");
-  } else {
+  if (!digitalRead(Gateway)){
+    u8x8.setCursor(15 ,0);              // Column, Row
+    if (!NoFirstData) {
+      u8x8.print("C");
+    } else {
     u8x8.print("E");
+    }
   }
   u8x8.setCursor(0 ,2);              // Column, Row
   u8x8.print("  Power   "); if (MenuVar[0] < 1) u8x8.print("OFF"); else u8x8.print("ON "); 
